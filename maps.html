@@ -101,10 +101,8 @@
     </div>
 </div>
 
-
 <script>
-    const svgPath = 'map/world.svg';
-
+    const svgPath = '/map/world.svg';
 
     const startScreen  = document.getElementById('start-screen');
     const startButton  = document.getElementById('start-button');
@@ -130,7 +128,6 @@
     let startX, startY;
 
     const countriesToFind = 5;
-    
 
     async function loadSVG(path) {
         try {
@@ -158,6 +155,12 @@
         const shuffled = [...paths].sort(() => Math.random() - 0.5);
         return shuffled.slice(0, count);
     }
+    function resetCountries() {
+        const paths = mapElement.querySelectorAll('path');
+        paths.forEach(path => {
+            path.style.fill = ''; // Удаляем цвет
+        });
+    }
 
     function highlightTargetCountries() {
         targetList.innerHTML = '<h3>Найди эти страны:</h3>';
@@ -183,6 +186,9 @@
     }
 
     function startGame() {
+        resetCountries();
+        selectedCountries = getRandomCountries(mapElement.querySelectorAll('path[title]'), countriesToFind); // Новый набор стран
+        highlightTargetCountries();
         gameActive = true;
         timeLeft = 30;
         score = 0;
@@ -203,6 +209,8 @@
             }
         }, 1000);
     }
+
+
 
     function endGame(win) {
         gameActive = false;
@@ -266,6 +274,51 @@
 
     mapContainer.addEventListener('touchcancel', () => {
         isDragging = false;
+    });
+    let lastTap = 0; // Для отслеживания двойного тапа
+    let initialDistance = null; // Для измерения расстояния между пальцами
+    let pinchZoomActive = false; // Флаг для активного жеста "пинч-зум"
+
+    // Функция для расчёта расстояния между двумя точками
+    function getDistance(touch1, touch2) {
+        const dx = touch1.clientX - touch2.clientX;
+        const dy = touch1.clientY - touch2.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    // Обработчик двойного тапа
+    mapContainer.addEventListener('touchstart', (event) => {
+        if (event.touches.length === 1) {
+            const currentTime = new Date().getTime();
+            if (currentTime - lastTap < 300) {
+                // Двойной тап detected
+                scale = Math.min(scale + 0.5, 5); // Увеличиваем масштаб
+                updateTransform();
+            }
+            lastTap = currentTime;
+        } else if (event.touches.length === 2) {
+            // Начало жеста "разведения пальцев"
+            pinchZoomActive = true;
+            initialDistance = getDistance(event.touches[0], event.touches[1]);
+        }
+    });
+
+    // Обработчик изменения масштаба при "разведении пальцев"
+    mapContainer.addEventListener('touchmove', (event) => {
+        if (pinchZoomActive && event.touches.length === 2) {
+            const currentDistance = getDistance(event.touches[0], event.touches[1]);
+            const distanceDelta = currentDistance / initialDistance;
+
+            // Обновляем масштаб
+            scale = Math.min(Math.max(scale * distanceDelta, 0.5), 5);
+            initialDistance = currentDistance; // Обновляем начальное расстояние
+            updateTransform();
+        }
+    });
+
+    // Завершение жеста "разведения пальцев"
+    mapContainer.addEventListener('touchend', () => {
+        pinchZoomActive = false;
     });
 
     startButton.addEventListener('click', startGame);
