@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Мини-игра с физикой</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden; /* Отключаем прокрутку */
+            width: 100vw; /* Фиксированная ширина */
+            height: 100vh; /* Фиксированная высота */
+        }
+        canvas {
+            display: block;
+            width: 100%; /* Устанавливаем ширину канваса на 100% */
+            height: 100%; /* Устанавливаем высоту канваса на 100% */
+        }
+    </style>
+</head>
+<body>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cannon/build/cannon.min.js"></script>
+
+<script>
+    // Инициализация сцены, камеры и рендерера
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Физический мир
+    const world = new CANNON.World();
+    world.gravity.set(0, -9.82, 0);
+
+    // Материал платформы
+    const platformMaterial = new CANNON.Material('platformMaterial');
+
+    // Платформа
+    const platformGeometry = new THREE.BoxGeometry(10, 0.2, 10);
+    const platformMaterialThree = new THREE.MeshBasicMaterial({ color: 0x8B4513 });
+    const platform = new THREE.Mesh(platformGeometry, platformMaterialThree);
+    platform.position.set(0, 0, 0); // Платформа на уровне Y = 0
+    scene.add(platform);
+
+    const platformBody = new CANNON.Body({
+        mass: 0, // Нулевая масса, чтобы объект не двигался
+        shape: new CANNON.Box(new CANNON.Vec3(5, 0.1, 5)),
+        material: platformMaterial
+    });
+    platformBody.position.copy(platform.position);
+    world.addBody(platformBody);
+
+    // Добавление реагентов
+    const reagents = [];
+    const addReagent = (name, position, color) => {
+        const geometry = new THREE.SphereGeometry(1, 32, 32);
+        const material = new THREE.MeshBasicMaterial({ color });
+        const reagent = new THREE.Mesh(geometry, material);
+
+        // Центрируем геометрию объекта
+        geometry.computeBoundingBox();
+        const boundingBox = geometry.boundingBox;
+        const center = new THREE.Vector3();
+        boundingBox.getCenter(center);
+        geometry.translate(-center.x, -center.y, -center.z);
+
+        reagent.position.copy(position);
+        scene.add(reagent);
+
+        const body = new CANNON.Body({
+            mass: 1,
+            shape: new CANNON.Sphere(1),
+            position: new CANNON.Vec3(position.x, position.y, position.z)
+        });
+        world.addBody(body);
+
+        reagents.push({ mesh: reagent, body });
+    };
+
+    addReagent('H2SO4', new THREE.Vector3(-3, 5, 0), 0xff0000);
+    addReagent('NaOH', new THREE.Vector3(3, 5, 0), 0x0000ff);
+
+    // Перетаскивание объектов
+    let draggingObject = null;
+    const raycaster = new THREE.Raycaster();
+    const touch = new THREE.Vector2();
+    const offset = new THREE.Vector3();
+
+    function getTouchPosition(event) {
+        const touchEvent = event.touches[0] || event.changedTouches[0];
+        touch.x = (touchEvent.clientX / window.innerWidth) * 2 - 1;
+        touch.y = -(touchEvent.clientY / window.innerHeight) * 2 + 1;
+    }
+
+    function getMousePosition(event) {
+        touch.x = (event.clientX / window.innerWidth) * 2 - 1;
+        touch.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    }
+
+    // Для клика мыши
+    window.addEventListener('mousedown', (event) => {
+        getMousePosition(event);
+
+        raycaster.setFromCamera(touch, camera);
+        const intersects = raycaster.intersectObjects(reagents.map(r => r.mesh));
+
+        if (intersects.length > 0) {
+            draggingObject = reagents.find(r => r.mesh === intersects[0].object);
+            const intersectPoint = intersects[0].point;
+            offset.copy(draggingObject.mesh.position).sub(intersectPoint);
+
+            // Визуализация выделенного объекта
+            draggingObject.mesh.material.opacity = 0.5;
+            draggingObject.mesh.material.transparent = true;
+        }
+    });
+
+    // Для перемещения мышью
+    window.addEventListener('mousemove', (event) => {
+        if (draggingObject) {
+            getMousePosition(event);
+
+            raycaster.setFromCamera(touch, camera);
+            const intersects = raycaster.intersectObject(platform);
+
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+
+                // Проверка, чтобы объект не выходил за границы платформы
+                const clampedX = Math.max(platformBounds.minX, Math.min(platformBounds.maxX, point.x));
+                const clampedZ = Math.max(platformBounds.minZ, Math.min(platformBounds.maxZ, point.z));
+
+                draggingObject.mesh.position.set(clampedX, point.y + 1, clampedZ);
+                draggingObject.body.position.set(clampedX, point.y + 1, clampedZ);
+            }
+        }
+    });
+
+    // Для завершения перетаскивания мышью
+    window.addEventListener('mouseup', () => {
+        if (draggingObject) {
+            // Восстановление прозрачности и визуализации объекта
+            draggingObject.mesh.material.opacity = 1;
+            draggingObject.mesh.material.transparent = false;
+
+            // Сброс инерции
+            draggingObject.body.velocity.set(0, 0, 0);
+            draggingObject.body.angularVelocity.set(0, 0, 0);
+
+            draggingObject = null;
+        }
+    });
+
+    // Для касания экрана
+    window.addEventListener('touchstart', (event) => {
+        getTouchPosition(event);
+
+        raycaster.setFromCamera(touch, camera);
+        const intersects = raycaster.intersectObjects(reagents.map(r => r.mesh));
+
+        if (intersects.length > 0) {
+            draggingObject = reagents.find(r => r.mesh === intersects[0].object);
+            const intersectPoint = intersects[0].point;
+            offset.copy(draggingObject.mesh.position).sub(intersectPoint);
+
+            // Визуализация выделенного объекта
+            draggingObject.mesh.material.opacity = 0.5;
+            draggingObject.mesh.material.transparent = true;
+        }
+    });
+
+    // Для перемещения при касании
+    window.addEventListener('touchmove', (event) => {
+        if (draggingObject) {
+            getTouchPosition(event);
+
+            raycaster.setFromCamera(touch, camera);
+            const intersects = raycaster.intersectObject(platform);
+
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+
+                // Проверка, чтобы объект не выходил за границы платформы
+                const clampedX = Math.max(platformBounds.minX, Math.min(platformBounds.maxX, point.x));
+                const clampedZ = Math.max(platformBounds.minZ, Math.min(platformBounds.maxZ, point.z));
+
+                draggingObject.mesh.position.set(clampedX, point.y + 1, clampedZ);
+                draggingObject.body.position.set(clampedX, point.y + 1, clampedZ);
+            }
+        }
+    });
+
+    // Для завершения перетаскивания при касании
+    window.addEventListener('touchend', () => {
+        if (draggingObject) {
+            // Восстановление прозрачности и визуализации объекта
+            draggingObject.mesh.material.opacity = 1;
+            draggingObject.mesh.material.transparent = false;
+
+            // Сброс инерции
+            draggingObject.body.velocity.set(0, 0, 0);
+            draggingObject.body.angularVelocity.set(0, 0, 0);
+
+            draggingObject = null;
+        }
+    });
+
+    const platformBounds = {
+        minX: -5, // Минимальная координата X платформы
+        maxX: 5,  // Максимальная координата X платформы
+        minZ: -5, // Минимальная координата Z платформы
+        maxZ: 5   // Максимальная координата Z платформы
+    };
+
+    // Отображение луча для отладки
+    const debugLineMaterial = new THREE.LineBasicMaterial({ color: 0xff0000 });
+    const debugLineGeometry = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0, 0, 0)
+    ]);
+    const debugLine = new THREE.Line(debugLineGeometry, debugLineMaterial);
+    scene.add(debugLine);
+
+    function updateDebugLine() {
+        if (draggingObject) {
+            const points = [
+                raycaster.ray.origin,
+                raycaster.ray.origin.clone().add(raycaster.ray.direction.multiplyScalar(10))
+            ];
+            debugLine.geometry.setFromPoints(points);
+        } else {
+            debugLine.geometry.setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+        }
+    }
+
+    // Анимация
+    function animate() {
+        requestAnimationFrame(animate);
+
+        world.step(1 / 60);
+
+        reagents.forEach(r => {
+            r.mesh.position.copy(r.body.position);
+            r.mesh.quaternion.copy(r.body.quaternion);
+        });
+
+        updateDebugLine();
+
+        renderer.render(scene, camera);
+    }
+
+    camera.position.set(0, 8, 10); // Переместили камеру выше и дальше
+    camera.lookAt(0, 0, 0); // Камера смотрит на центр сцены
+
+    animate();
+
+    window.addEventListener('resize', () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Отключение прокрутки
+    window.addEventListener('touchmove', (event) => {
+        event.preventDefault();  // Остановить прокрутку на мобильных устройствах
+    }, { passive: false });
+
+</script>
+</body>
+</html>
