@@ -14,7 +14,6 @@
         #game-container {
             position: relative;
             background-color: #87CEEB;
-            /*height: 100vh;*/
             display: flex;
             flex-direction: column;
         }
@@ -73,21 +72,100 @@
 
         path {
             fill: #0055ff;
-            transition: fill 0.3s;
+            stroke: #202020;
+            stroke-width: 0.9px;
+            transition: fill 0.3s, stroke 0.3s;
             cursor: pointer;
         }
 
         path:hover {
             fill: orange;
         }
+        
+        #lives-container {
+            position: absolute;
+            top: 10px;
+            right: 100px;
+            font-size: 24px;
+            font-weight: bold;
+            color: red;
+            z-index: 5;
+        }
+        
+        #end-game-button {
+            position: absolute;
+            top: 50px;
+            right: 10px;
+            padding: 10px 20px;
+            font-size: 18px;
+            z-index: 5;
+        }
+
+
+        #start-screen {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8); /* Затемнённый фон */
+    color: white;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    z-index: 10;
+}
+
+h1 {
+    font-size: 48px;
+    margin-bottom: 20px;
+}
+
+.game-overlay {
+    background: rgba(255, 255, 255, 0.9);
+    color: #202020;
+    padding: 40px;
+    margin: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+    max-width: 400px;
+}
+
+#start-button {
+    padding: 12px 25px;
+    font-size: 20px;
+    font-weight: bold;
+    color: white;
+    background: #007BFF;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.3s, transform 0.2s;
+    margin-top: 20px;
+}
+
+#start-button:hover {
+    background: #0056b3;
+    transform: scale(1.05);
+}
+     
     </style>
 </head>
 <body>
+
 <div id="game-container">
     <div id="start-screen">
         <h1>Найди страны!</h1>
-        <button id="start-button" style="padding: 10px 20px; font-size: 18px;">Начать игру</button>
+        <div class="game-overlay">
+            <p>У тебя есть 30 секунд, чтобы найти все указанные страны на карте.  
+            Кликни по стране, чтобы проверить свою догадку!  
+            Зеленый цвет – правильно, красный – ошибка.</p>
+            <button id="start-button">Начать игру</button>
+        </div>
     </div>
+
     <div id="result-screen">
         <h1 id="result-title">Игра окончена</h1>
         <div id="found-list" style="margin-top: 20px;"></div>
@@ -95,7 +173,9 @@
         <button id="restart-button" style="margin-top: 30px; padding: 10px 20px; font-size: 18px;">Начать заново</button>
     </div>
     <div id="target-list"></div>
+    <div id="lives-container">❤️❤️❤️</div>
     <div id="timer">00:30</div>
+    <button id="end-game-button" style="position: absolute; top: 50px; right: 10px; padding: 10px 20px; font-size: 18px;">Завершить игру</button>
     <div id="map-container">
         <div id="map"></div>
     </div>
@@ -104,31 +184,46 @@
 <script>
     const svgPath = 'map/world.svg';
 
-    const startScreen  = document.getElementById('start-screen');
-    const startButton  = document.getElementById('start-button');
+    // Элементы DOM
+    const startScreen = document.getElementById('start-screen');
+    const startButton = document.getElementById('start-button');
     const resultScreen = document.getElementById('result-screen');
-    const resultTitle  = document.getElementById('result-title');
-    const foundList    = document.getElementById('found-list');
-    const missedList   = document.getElementById('missed-list');
+    const resultTitle = document.getElementById('result-title');
+    const foundList = document.getElementById('found-list');
+    const missedList = document.getElementById('missed-list');
     const restartButton = document.getElementById('restart-button');
     const timerElement = document.getElementById('timer');
-    const mapElement   = document.getElementById('map');
+    const mapElement = document.getElementById('map');
     const mapContainer = document.getElementById('map-container');
-    const targetList   = document.getElementById('target-list');
+    const targetList = document.getElementById('target-list');
+    const endGameButton = document.getElementById('end-game-button');
+    const livesContainer = document.getElementById('lives-container');
 
+    // Игровые переменные
     let gameActive = false;
     let timeLeft = 30;
     let selectedCountries = [];
     let score = 0;
+    let timerInterval;
+    let lives = 3;
+    const countriesToFind = 5;
 
+    // Переменные для управления картой
     let scale = 1;
     let translateX = 0;
     let translateY = 0;
     let isDragging = false;
     let startX, startY;
 
-    const countriesToFind = 5;
+    // Обновление отображения жизней
+    function updateLives() {
+        livesContainer.innerHTML = '❤️'.repeat(lives);
+        if (lives <= 0) {
+            endGame(false);
+        }
+    }
 
+    // Загрузка SVG карты
     async function loadSVG(path) {
         try {
             const response = await fetch(path);
@@ -151,17 +246,21 @@
         }
     }
 
+    // Выбор случайных стран
     function getRandomCountries(paths, count) {
         const shuffled = [...paths].sort(() => Math.random() - 0.5);
         return shuffled.slice(0, count);
     }
+    
+    // Сброс цветов стран
     function resetCountries() {
         const paths = mapElement.querySelectorAll('path');
         paths.forEach(path => {
-            path.style.fill = ''; // Удаляем цвет
+            path.style.fill = '';
         });
     }
 
+    // Отображение списка стран для поиска
     function highlightTargetCountries() {
         targetList.innerHTML = '<h3>Найди эти страны:</h3>';
         selectedCountries.forEach(country => {
@@ -171,32 +270,65 @@
             targetList.appendChild(listItem);
         });
     }
-
+    
+    // Обработка клика по стране
     function handleCountryClick(path, countryName) {
         if (!gameActive) return;
+
         if (selectedCountries.includes(path)) {
-            path.style.fill = 'green';
-            score++;
+            if (path.style.fill === 'green') {
+                path.style.fill = '';
+                lives--;
+                updateLives();
+            } else {
+                path.style.fill = 'green';
+                score++;
+            }
+
             selectedCountries = selectedCountries.filter(c => c !== path);
             highlightTargetCountries();
+
             if (score === countriesToFind) endGame(true);
         } else {
-            path.style.fill = 'red';
+            if (path.style.fill === 'red') {
+                path.style.fill = '';
+                lives--;
+                score = Math.max(0, score - 1);
+                updateLives();
+            } else {
+                if (score >= countriesToFind) {
+                    alert("Вы уже выбрали 5 стран! Нельзя выбирать больше.");
+                    return;
+                }
+                path.style.fill = 'red';
+                score++;
+            }
         }
     }
 
+    // Начало игры
     function startGame() {
+        // Сброс всех параметров игры
         resetCountries();
-        selectedCountries = getRandomCountries(mapElement.querySelectorAll('path[title]'), countriesToFind); // Новый набор стран
+        clearInterval(timerInterval);
+        
+        // Обновление жизней
+        lives = 3;
+        updateLives();
+        
+        // Выбор новых стран
+        const paths = mapElement.querySelectorAll('path[title]');
+        selectedCountries = getRandomCountries(paths, countriesToFind);
+        
         highlightTargetCountries();
         gameActive = true;
         timeLeft = 30;
         score = 0;
-        timerElement.textContent = `00:${timeLeft}`;
+        timerElement.textContent = `00:${timeLeft < 10 ? '0' : ''}${timeLeft}`;
         startScreen.style.display = 'none';
         resultScreen.style.display = 'none';
 
-        const timerInterval = setInterval(() => {
+        timerInterval = setInterval(() => {
             if (!gameActive) {
                 clearInterval(timerInterval);
                 return;
@@ -210,20 +342,23 @@
         }, 1000);
     }
 
-
-
+    // Завершение игры
     function endGame(win) {
         gameActive = false;
-        resultTitle.textContent = win ? 'Поздравляем! Вы нашли все страны!' : 'Время вышло!';
+        clearInterval(timerInterval);
+        
+        resultTitle.textContent = win ? 'Поздравляем! Вы нашли все страны!' : 'Игра завершена!';
         foundList.innerHTML = `<h3>Найдено:</h3>${Array.from(document.querySelectorAll('path[style*="green"]')).map(p => `<div>${p.getAttribute('title')}</div>`).join('')}`;
         missedList.innerHTML = `<h3>Не найдено:</h3>${selectedCountries.map(c => `<div>${c.getAttribute('title')}</div>`).join('')}`;
         resultScreen.style.display = 'flex';
     }
 
+    // Обновление трансформации карты
     function updateTransform() {
         mapElement.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
     }
 
+    // Обработчики событий для управления картой
     mapContainer.addEventListener('wheel', (event) => {
         event.preventDefault();
         const zoomSpeed = 0.1;
@@ -254,6 +389,7 @@
         isDragging = false;
     });
 
+    // Обработчики для сенсорных устройств
     mapContainer.addEventListener('touchstart', (event) => {
         isDragging = true;
         startX = event.touches[0].clientX - translateX;
@@ -275,54 +411,15 @@
     mapContainer.addEventListener('touchcancel', () => {
         isDragging = false;
     });
-    let lastTap = 0; // Для отслеживания двойного тапа
-    let initialDistance = null; // Для измерения расстояния между пальцами
-    let pinchZoomActive = false; // Флаг для активного жеста "пинч-зум"
 
-    // Функция для расчёта расстояния между двумя точками
-    function getDistance(touch1, touch2) {
-        const dx = touch1.clientX - touch2.clientX;
-        const dy = touch1.clientY - touch2.clientY;
-        return Math.sqrt(dx * dx + dy * dy);
-    }
-
-    // Обработчик двойного тапа
-    mapContainer.addEventListener('touchstart', (event) => {
-        if (event.touches.length === 1) {
-            const currentTime = new Date().getTime();
-            if (currentTime - lastTap < 300) {
-                // Двойной тап detected
-                scale = Math.min(scale + 0.5, 5); // Увеличиваем масштаб
-                updateTransform();
-            }
-            lastTap = currentTime;
-        } else if (event.touches.length === 2) {
-            // Начало жеста "разведения пальцев"
-            pinchZoomActive = true;
-            initialDistance = getDistance(event.touches[0], event.touches[1]);
-        }
-    });
-
-    // Обработчик изменения масштаба при "разведении пальцев"
-    mapContainer.addEventListener('touchmove', (event) => {
-        if (pinchZoomActive && event.touches.length === 2) {
-            const currentDistance = getDistance(event.touches[0], event.touches[1]);
-            const distanceDelta = currentDistance / initialDistance;
-
-            // Обновляем масштаб
-            scale = Math.min(Math.max(scale * distanceDelta, 0.5), 5);
-            initialDistance = currentDistance; // Обновляем начальное расстояние
-            updateTransform();
-        }
-    });
-
-    // Завершение жеста "разведения пальцев"
-    mapContainer.addEventListener('touchend', () => {
-        pinchZoomActive = false;
-    });
-
+    // Инициализация игры
     startButton.addEventListener('click', startGame);
     restartButton.addEventListener('click', startGame);
+    endGameButton.addEventListener('click', () => {
+        if (gameActive) {
+            endGame(false);
+        }
+    });
 
     loadSVG(svgPath);
 </script>
